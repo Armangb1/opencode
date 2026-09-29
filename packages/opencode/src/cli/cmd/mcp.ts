@@ -99,6 +99,8 @@ export const McpCommand = cmd({
     yargs
       .command(McpAddCommand)
       .command(McpListCommand)
+      .command(McpEnableCommand)
+      .command(McpDisableCommand)
       .command(McpAuthCommand)
       .command(McpLogoutCommand)
       .command(McpDebugCommand)
@@ -425,6 +427,77 @@ async function addMcpToConfig(name: string, mcpConfig: ConfigMCPV1.Info, configP
 
   return configPath
 }
+
+async function findMcpConfigPath(name: string, worktree: string) {
+  const projectPath = await resolveConfigPath(worktree)
+  if (await Filesystem.exists(projectPath)) {
+    const projectText = await Filesystem.readText(projectPath).catch(() => "")
+    if (projectText.includes(`"${name}"`)) return projectPath
+  }
+
+  const globalPath = await resolveConfigPath(Global.Path.config, true)
+  if (await Filesystem.exists(globalPath)) {
+    const globalText = await Filesystem.readText(globalPath).catch(() => "")
+    if (globalText.includes(`"${name}"`)) return globalPath
+  }
+
+  return undefined
+}
+
+async function setMcpEnabled(name: string, enabled: boolean, worktree: string) {
+  const configPath = await findMcpConfigPath(name, worktree)
+  if (!configPath) throw new Error(`MCP server not found: ${name}`)
+
+  const text = await Filesystem.readText(configPath)
+  const edits = modify(text, ["mcp", name, "enabled"], enabled, {
+    formattingOptions: { tabSize: 2, insertSpaces: true },
+  })
+  await Filesystem.write(configPath, applyEdits(text, edits))
+
+  return configPath
+}
+
+export const McpDisableCommand = effectCmd({
+  command: "disable <name>",
+  describe: "disable an MCP server",
+  builder: (yargs) =>
+    yargs.positional("name", {
+      describe: "name of the MCP server",
+      type: "string",
+      demandOption: true,
+    }),
+  handler: Effect.fn("Cli.mcp.disable")(function* (args) {
+    const maybeCtx = yield* InstanceRef
+    if (!maybeCtx) return yield* Effect.die("InstanceRef not provided")
+    const ctx = maybeCtx
+    UI.empty()
+    prompts.intro("Disable MCP server")
+    const configPath = yield* Effect.promise(() => setMcpEnabled(args.name, false, ctx.worktree))
+    prompts.log.success(`MCP server "${args.name}" disabled in ${configPath}`)
+    prompts.outro("Done")
+  }),
+})
+
+export const McpEnableCommand = effectCmd({
+  command: "enable <name>",
+  describe: "enable an MCP server",
+  builder: (yargs) =>
+    yargs.positional("name", {
+      describe: "name of the MCP server",
+      type: "string",
+      demandOption: true,
+    }),
+  handler: Effect.fn("Cli.mcp.enable")(function* (args) {
+    const maybeCtx = yield* InstanceRef
+    if (!maybeCtx) return yield* Effect.die("InstanceRef not provided")
+    const ctx = maybeCtx
+    UI.empty()
+    prompts.intro("Enable MCP server")
+    const configPath = yield* Effect.promise(() => setMcpEnabled(args.name, true, ctx.worktree))
+    prompts.log.success(`MCP server "${args.name}" enabled in ${configPath}`)
+    prompts.outro("Done")
+  }),
+})
 
 export const McpAddCommand = effectCmd({
   command: "add [name]",
